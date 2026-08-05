@@ -11,6 +11,7 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\FreeIM\FreeIM.csproj" />
+		<ProjectReference Include="..\..\Industrial.Health\src\Industrial.Health.Abstractions\Industrial.Health.Abstractions.csproj" />
 	</ItemGroup>
 	<ItemGroup>
 		<Content Update="appsettings.Production.json">
