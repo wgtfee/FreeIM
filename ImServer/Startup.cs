@@ -1,29 +1,55 @@
-﻿using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
+﻿using System.Text;
+using FreeRedis;
+using Industrial.Health;
+using Industrial.Security.Abstractions;
+using Industrial.Security.AspNetCore;
+using imServer.IndustrialSecurity;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using Industrial.Health;
-using System;
-using System.Text;
 
 namespace imServer
 {
-
     public class Startup
     {
-
         public Startup(IConfiguration configuration)
         {
             Configuration = configuration;
         }
 
-        public IConfiguration Configuration;
+        public IConfiguration Configuration { get; }
 
         public void ConfigureServices(IServiceCollection services)
         {
+            services.AddHttpContextAccessor();
+            services.AddIndustrialSecurity(Configuration);
+            services.AddScoped<IShadowUserResolver, FreeImNoLocalShadowUserResolver>();
+            services.AddScoped<ILocalPermissionSource, FreeImDenyLocalPermissionSource>();
+
+            services.AddAuthentication(options =>
+            {
+                options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+                options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+                options.DefaultScheme = JwtBearerDefaults.AuthenticationScheme;
+            }).AddIndustrialJwt(Configuration);
+            services.AddAuthorization();
+            services.AddControllers();
+
+            var redisConnection = Configuration["ImServerOption:RedisClient"]
+                ?? throw new InvalidOperationException("ImServerOption:RedisClient is required.");
+            var redis = new RedisClient(redisConnection);
+            services.AddSingleton(redis);
+            services.AddSingleton(sp => new ImClient(new ImClientOptions
+            {
+                Redis = sp.GetRequiredService<RedisClient>(),
+                Servers = GetServers(Configuration),
+                PathMatch = "/ws"
+            }));
+            services.AddSingleton<FreeImIdentityService>();
         }
 
         public void Configure(IApplicationBuilder app, ILoggerFactory loggerFactory)
@@ -31,11 +57,10 @@ namespace imServer
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
             Console.OutputEncoding = Encoding.GetEncoding("GB2312");
             Console.InputEncoding = Encoding.GetEncoding("GB2312");
-            
+
             app.UseDeveloperExceptionPage();
 
-            // Keep liveness/readiness separate from the WebSocket endpoint so
-            // YARP can monitor this independent IM business service.
+            // Health remains public so YARP can make routing decisions even when IAM is down.
             app.Use(async (context, next) =>
             {
                 if (HttpMethods.IsGet(context.Request.Method)
@@ -68,12 +93,32 @@ namespace imServer
                 await next();
             });
 
+            app.UseRouting();
+            app.UseAuthentication();
+            app.UseIndustrialSecurity();
+            app.UseAuthorization();
+
+            // `/ws` is protected by the native FreeIM short-lived handshake token. The
+            // long-lived IAM access token is used only to mint that ticket through /api/im/connect.
             app.UseFreeImServer(new ImServerOptions
             {
-                Redis = new FreeRedis.RedisClient(Configuration["ImServerOption:RedisClient"]),
-                Servers = Configuration["ImServerOption:Servers"].Split(";"),
+                Redis = app.ApplicationServices.GetRequiredService<RedisClient>(),
+                Servers = GetServers(Configuration),
                 Server = Configuration["ImServerOption:Server"]
+                    ?? throw new InvalidOperationException("ImServerOption:Server is required.")
+            });
+
+            app.UseEndpoints(endpoints =>
+            {
+                endpoints.MapControllers();
+                endpoints.MapIndustrialSecurityCacheInvalidation();
+                endpoints.MapIndustrialLocalUserManagementInfo();
             });
         }
+
+        private static string[] GetServers(IConfiguration configuration)
+            => (configuration["ImServerOption:Servers"]
+                ?? throw new InvalidOperationException("ImServerOption:Servers is required."))
+                .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 }
