@@ -1,5 +1,4 @@
-﻿
-#if ns20
+﻿#if ns20
 
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -81,9 +80,19 @@ class ImServer : ImClient
 
         string token = context.Request.Query["token"];
         if (string.IsNullOrEmpty(token)) return;
-        var token_value = _redis.Get($"{_redisPrefix}Token{token}");
+
+        // Consume the short-lived ticket atomically in Redis. The previous GET-only
+        // implementation allowed the same token to be replayed during its 10 second
+        // TTL and an in-memory guard could only protect a single IM node. GET+DEL in
+        // one Lua script makes the ticket one-time across the whole Redis-backed IM
+        // cluster without changing the wire protocol.
+        var tokenKey = $"{_redisPrefix}Token{token}";
+        var tokenResult = _redis.Eval(
+            "local value = redis.call('GET', KEYS[1]); if value then redis.call('DEL', KEYS[1]); end; return value",
+            new[] { tokenKey });
+        var token_value = tokenResult?.ToString();
         if (string.IsNullOrEmpty(token_value))
-            throw new Exception("授权错误：用户需通过 ImHelper.PrevConnectServer 获得包含 token 的连接");
+            throw new Exception("授权错误：连接票据无效、已过期或已被使用");
 
         var data = JsonConvert.DeserializeObject<(long clientId, string clientMetaData)>(token_value);
 
@@ -152,7 +161,6 @@ class ImServer : ImClient
             {
                 data = JsonConvert.DeserializeObject<(long senderClientId, List<long>, string content, bool receipt)>(msgtxt);
                 receiveClientIds = data.Item2;
-                //Console.WriteLine($"收到消息：{data.content}" + (data.receipt ? "【需回执】" : ""));
             }
 
             var outgoing = new ArraySegment<byte>(Encoding.UTF8.GetBytes(data.content));
@@ -160,7 +168,6 @@ class ImServer : ImClient
             {
                 if (_clients.TryGetValue(clientId, out var wslist) == false)
                 {
-                    //Console.WriteLine($"websocket{clientId} 离线了，{data.content}" + (data.receipt ? "【需回执】" : ""));
                     if (data.senderClientId != 0 && clientId != data.senderClientId && data.receipt)
                         SendMessage(clientId, new[] { data.senderClientId }, new
                         {
@@ -171,9 +178,6 @@ class ImServer : ImClient
                 }
 
                 ImServerClient[] sockarray = wslist.Values.ToArray();
-
-                //如果接收消息人是发送者，并且接收者只有1个以下，则不发送
-                //只有接收者为多端时，才转发消息通知其他端
                 if (clientId == data.senderClientId && sockarray.Length <= 1) continue;
 
                 foreach (var sh in sockarray)
