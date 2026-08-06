@@ -2,27 +2,29 @@
 
 	<PropertyGroup>
 		<TargetFramework>net8.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
 		<DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
 	</PropertyGroup>
 
 	<ItemGroup>
+		<PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.16" />
 		<PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<ProjectReference Include="..\FreeIM\FreeIM.csproj" />
+		<ProjectReference Include="..\..\Industrial.Security\src\Industrial.Security.Abstractions\Industrial.Security.Abstractions.csproj" />
+		<ProjectReference Include="..\..\Industrial.Security\src\Industrial.Security.AspNetCore\Industrial.Security.AspNetCore.csproj" />
 		<ProjectReference Include="..\..\Industrial.Health\src\Industrial.Health.Abstractions\Industrial.Health.Abstractions.csproj" />
 	</ItemGroup>
 	<ItemGroup>
-		<Content Update="appsettings.Production.json">
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-		</Content>
-		<Content Update="appsettings.Development.json">
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-		</Content>
-		<Content Update="appsettings.json">
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-		</Content>
+		<Content Update="permission-manifest.json" CopyToOutputDirectory="PreserveNewest" />
+		<Content Update="appsettings.IamPrepare.json" CopyToOutputDirectory="PreserveNewest" />
+		<Content Update="appsettings.Centralized.json" CopyToOutputDirectory="PreserveNewest" />
+		<Content Update="appsettings.Production.json" CopyToOutputDirectory="PreserveNewest" />
+		<Content Update="appsettings.Development.json" CopyToOutputDirectory="PreserveNewest" />
+		<Content Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
 	</ItemGroup>
 
 </Project>
