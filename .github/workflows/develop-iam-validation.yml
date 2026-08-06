@@ -1,0 +1,59 @@
+name: FreeIM IAM Validation
+
+on:
+  push:
+    branches: [ Develop ]
+  pull_request:
+    branches: [ Develop ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout FreeIM
+        uses: actions/checkout@v4
+        with:
+          path: platform/FreeIM
+
+      - name: Checkout Security.Abstractions
+        uses: actions/checkout@v4
+        with:
+          repository: wgtfee/Industrial.Security.Abstractions
+          ref: master
+          path: platform/Industrial.Security/src/Industrial.Security.Abstractions
+
+      - name: Checkout Security.AspNetCore
+        uses: actions/checkout@v4
+        with:
+          repository: wgtfee/Industrial.Security.AspNetCore
+          ref: master
+          path: platform/Industrial.Security/src/Industrial.Security.AspNetCore
+
+      - name: Checkout Health.Abstractions
+        uses: actions/checkout@v4
+        with:
+          repository: wgtfee/Industrial.Health.Abstractions
+          ref: master
+          path: platform/Industrial.Health/src/Industrial.Health.Abstractions
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore tests
+        working-directory: platform/FreeIM
+        run: dotnet restore ImServer.Tests/ImServer.Tests.csproj
+
+      - name: Run IAM integration tests
+        working-directory: platform/FreeIM
+        run: dotnet test ImServer.Tests/ImServer.Tests.csproj --configuration Release --no-restore --verbosity normal
+
+      - name: Build FreeIM host
+        working-directory: platform/FreeIM
+        run: dotnet build ImServer/ImServer.csproj --configuration Release --no-restore
