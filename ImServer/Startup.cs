@@ -98,8 +98,11 @@ namespace imServer
             app.UseIndustrialSecurity();
             app.UseAuthorization();
 
-            // `/ws` is protected by the native FreeIM short-lived handshake token. The
-            // long-lived IAM access token is used only to mint that ticket through /api/im/connect.
+            // The long-lived IAM access token is used only to mint the native FreeIM
+            // ticket. Before the legacy /ws handler consumes it, reject any same-node
+            // replay so the 10-second ticket is effectively single-use in the current
+            // single-backend deployment.
+            app.UseMiddleware<FreeImHandshakeReplayGuardMiddleware>();
             app.UseFreeImServer(new ImServerOptions
             {
                 Redis = app.ApplicationServices.GetRequiredService<RedisClient>(),
