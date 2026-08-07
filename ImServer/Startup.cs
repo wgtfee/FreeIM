@@ -61,6 +61,8 @@ namespace imServer
             app.UseDeveloperExceptionPage();
 
             // Health remains public so YARP can make routing decisions even when IAM is down.
+            // Liveness describes only the process. Traffic/dependency health also probes Redis,
+            // because FreeIM cannot mint/consume connection tickets without that critical store.
             app.Use(async (context, next) =>
             {
                 if (HttpMethods.IsGet(context.Request.Method)
@@ -70,23 +72,64 @@ namespace imServer
                         || context.Request.Path.Equals("/health/traffic", StringComparison.OrdinalIgnoreCase)
                         || context.Request.Path.Equals("/healthz", StringComparison.OrdinalIgnoreCase)))
                 {
-                    context.Response.StatusCode = StatusCodes.Status200OK;
                     context.Response.ContentType = "application/json; charset=utf-8";
                     var now = DateTimeOffset.UtcNow;
-                    var snapshot = HealthSnapshotEvaluator.Evaluate("im", Environment.MachineName, Array.Empty<DependencyHealthItem>(), checkedAt: now);
-                    if (context.Request.Path.Equals("/health/traffic", StringComparison.OrdinalIgnoreCase))
-                        await context.Response.WriteAsJsonAsync(HealthSnapshotEvaluator.ToTrafficHealth(snapshot));
-                    else if (context.Request.Path.Equals("/health/dependencies", StringComparison.OrdinalIgnoreCase))
-                        await context.Response.WriteAsJsonAsync(snapshot);
-                    else
+                    var isLiveness = context.Request.Path.Equals("/health/live", StringComparison.OrdinalIgnoreCase)
+                        || context.Request.Path.Equals("/healthz", StringComparison.OrdinalIgnoreCase);
+
+                    if (isLiveness)
+                    {
+                        context.Response.StatusCode = StatusCodes.Status200OK;
                         await context.Response.WriteAsJsonAsync(new
                         {
                             service = "im",
                             instance = Environment.MachineName,
                             status = ServiceStatus.Healthy,
-                            application = snapshot.Application,
+                            application = new ApplicationHealth(ServiceStatus.Healthy, true, now),
                             checkedAt = now
                         });
+                        return;
+                    }
+
+                    var redis = context.RequestServices.GetRequiredService<RedisClient>();
+                    var redisHealthy = ProbeRedis(redis, TimeSpan.FromSeconds(1));
+                    var dependencies = new[]
+                    {
+                        new DependencyHealthItem(
+                            "Redis",
+                            redisHealthy ? DependencyStatus.Healthy : DependencyStatus.Unhealthy,
+                            DependencyCriticality.Critical,
+                            redisHealthy ? null : "REDIS_CONNECTION_FAILED",
+                            redisHealthy ? null : "FreeIM Redis is unavailable",
+                            redisHealthy ? null : now,
+                            redisHealthy ? null : "Realtime ticket issuance and delivery are unavailable",
+                            FallbackAvailable: false)
+                    };
+                    var snapshot = HealthSnapshotEvaluator.Evaluate("im", Environment.MachineName, dependencies, checkedAt: now);
+                    var traffic = HealthSnapshotEvaluator.ToTrafficHealth(snapshot);
+
+                    if (context.Request.Path.Equals("/health/traffic", StringComparison.OrdinalIgnoreCase))
+                    {
+                        context.Response.StatusCode = traffic.Status == TrafficStatus.Allowed
+                            ? StatusCodes.Status200OK
+                            : StatusCodes.Status503ServiceUnavailable;
+                        await context.Response.WriteAsJsonAsync(traffic);
+                    }
+                    else if (context.Request.Path.Equals("/health/dependencies", StringComparison.OrdinalIgnoreCase))
+                    {
+                        context.Response.StatusCode = snapshot.ServiceStatus == ServiceStatus.Unavailable
+                            ? StatusCodes.Status503ServiceUnavailable
+                            : StatusCodes.Status200OK;
+                        await context.Response.WriteAsJsonAsync(snapshot);
+                    }
+                    else
+                    {
+                        // /health/ready follows traffic eligibility for load-balancer readiness.
+                        context.Response.StatusCode = traffic.Status == TrafficStatus.Allowed
+                            ? StatusCodes.Status200OK
+                            : StatusCodes.Status503ServiceUnavailable;
+                        await context.Response.WriteAsJsonAsync(traffic);
+                    }
                     return;
                 }
 
@@ -117,6 +160,21 @@ namespace imServer
                 endpoints.MapIndustrialSecurityCacheInvalidation();
                 endpoints.MapIndustrialLocalUserManagementInfo();
             });
+        }
+
+        private static bool ProbeRedis(RedisClient redis, TimeSpan timeout)
+        {
+            try
+            {
+                // GET of a dedicated non-business key is read-only: null means the probe
+                // reached Redis successfully, while connection failures throw.
+                var task = Task.Run(() => redis.Get("industrial:health:probe"));
+                return task.Wait(timeout) && task.IsCompletedSuccessfully;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static string[] GetServers(IConfiguration configuration)
