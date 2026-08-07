@@ -1,0 +1,78 @@
+name: FreeIM Develop IAM Contract
+
+on:
+  push:
+    branches: [ Develop ]
+  pull_request:
+    branches: [ Develop ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  iam-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate FreeIM IAM and websocket contract
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+
+          root = Path('ImServer')
+          centralized = json.loads((root / 'appsettings.Centralized.json').read_text(encoding='utf-8-sig'))
+          startup = (root / 'Startup.cs').read_text(encoding='utf-8-sig')
+          security = (root / 'IndustrialSecurity/FreeImIndustrialSecurity.cs').read_text(encoding='utf-8-sig')
+          replay = (root / 'IndustrialSecurity/FreeImHandshakeReplayGuardMiddleware.cs').read_text(encoding='utf-8-sig')
+
+          config = centralized['Security']
+          assert config['Authentication']['Mode'] == 'Centralized'
+          assert config['Authorization']['Mode'] == 'Centralized'
+          assert config['Central']['SystemCode'] == 'IM'
+          assert config['Central']['RequireSystemAccess'] is True
+          assert config['Central']['PermissionFailureMode'] == 'FailClosed'
+
+          for marker in [
+              'AddIndustrialSecurity(Configuration)',
+              'AddIndustrialJwt(Configuration)',
+              'UseIndustrialSecurity()',
+              'MapIndustrialSecurityCacheInvalidation()',
+              'MapIndustrialLocalUserManagementInfo()',
+              'FreeImHandshakeReplayGuardMiddleware',
+          ]:
+              assert marker in startup, f'Missing FreeIM host contract: {marker}'
+
+          for marker in [
+              'im.session.access',
+              '[Route("api/im")]',
+              '[HttpPost("connect")]',
+              '[Permission(FreeImPermissionCodes.SessionAccess)]',
+              'ExpiresInSeconds',
+              'PublicWebSocketPath',
+          ]:
+              assert marker in security, f'Missing FreeIM security contract: {marker}'
+
+          assert 'TryAdd(token' in replay
+          assert 'StatusCodes.Status401Unauthorized' in replay
+          print('FreeIM Develop IAM/websocket contract OK')
+
+      - name: Publish validation status
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const passed = '${{ job.status }}' === 'success';
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: passed ? 'success' : 'failure',
+              context: 'ci/freeim-iam-contract',
+              description: passed ? 'FreeIM IAM contract passed' : 'FreeIM IAM contract failed',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
