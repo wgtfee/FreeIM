@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate FreeIM IAM and websocket contract
+      - name: Validate FreeIM IAM, websocket and health contract
         shell: python
         run: |
           import json
@@ -59,7 +59,20 @@ jobs:
 
           assert 'TryAdd(token' in replay
           assert 'StatusCodes.Status401Unauthorized' in replay
-          print('FreeIM Develop IAM/websocket contract OK')
+
+          # YARP active health targets /health/traffic. Redis is a critical FreeIM
+          # dependency, so routing must be blocked rather than reporting false Healthy.
+          for marker in [
+              'ProbeRedis(redis, TimeSpan.FromSeconds(1))',
+              'DependencyCriticality.Critical',
+              'REDIS_CONNECTION_FAILED',
+              'TrafficStatus.Allowed',
+              'StatusCodes.Status503ServiceUnavailable',
+              'context.Request.Path.Equals("/health/traffic"',
+          ]:
+              assert marker in startup, f'Missing FreeIM traffic health contract: {marker}'
+
+          print('FreeIM Develop IAM/websocket/health contract OK')
 
       - name: Publish validation status
         if: always()
