@@ -1,17 +1,17 @@
 {
   "system": {
     "code": "IM",
-    "name": "FreeIM",
-    "description": "Platform identity and IM service administration only. Conversation membership, friendship, mute and group/channel ACL remain owned by FreeIM/business services."
+    "name": "IM",
+    "description": "FreeIM instant messaging service"
   },
   "version": "1.0.0",
   "resources": [
-    { "code": "im", "name": "IM", "type": "System", "sort": 0, "enabled": true },
-    { "code": "im.session", "name": "即时通信会话接入", "type": "Module", "parentCode": "im", "sort": 100, "enabled": true },
-    { "code": "im.session.access", "name": "进入即时通信服务", "type": "Action", "parentCode": "im.session", "apiPath": "/api/im/connect", "httpMethod": "POST", "sort": 110, "enabled": true },
-    { "code": "im.broadcast", "name": "平台广播", "type": "Module", "parentCode": "im", "sort": 200, "enabled": true },
-    { "code": "im.broadcast.send", "name": "发送平台广播", "type": "Action", "parentCode": "im.broadcast", "apiPath": "/api/im/broadcast", "httpMethod": "POST", "sort": 210, "enabled": true },
-    { "code": "im.administration", "name": "IM 管理", "type": "Module", "parentCode": "im", "sort": 300, "enabled": true },
-    { "code": "im.administration.manage", "name": "查看在线连接和管理 IM 服务", "type": "Action", "parentCode": "im.administration", "apiPath": "/api/im/online", "httpMethod": "GET", "sort": 310, "enabled": true }
+    { "code": "im", "name": "IM", "type": "System", "parentCode": null, "sort": 0 },
+    { "code": "im.session", "name": "会话", "type": "Module", "parentCode": "im", "sort": 100 },
+    { "code": "im.session.access", "name": "连接会话", "type": "Action", "parentCode": "im.session", "sort": 110 },
+    { "code": "im.broadcast", "name": "广播", "type": "Module", "parentCode": "im", "sort": 200 },
+    { "code": "im.broadcast.send", "name": "全站广播", "type": "Action", "parentCode": "im.broadcast", "sort": 210 },
+    { "code": "im.administration", "name": "系统管理", "type": "Module", "parentCode": "im", "sort": 300 },
+    { "code": "im.administration.manage", "name": "在线监控", "type": "Action", "parentCode": "im.administration", "sort": 310 }
   ]
 }
